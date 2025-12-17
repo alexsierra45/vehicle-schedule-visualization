@@ -19,7 +19,7 @@ import pyomo.environ as pyo
 # -----------------------------
 # Helpers: time parsing & mapping
 # -----------------------------
-DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+DAYS = ["Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Mon"]
 DAY_INDEX = {d: i for i, d in enumerate(DAYS)}
 
 FREQ_MAP = {
@@ -220,8 +220,18 @@ def build_week_parameters(
                 continue
             dep1 = abs_minutes(day, sch.dep_v1)
             arr1 = abs_arrival_minutes(day, sch.dep_v1, sch.arr_v1)
+
+            # V2 departure: "attach" it to the same cycle-day as V1,
+            # possibly rolling to the next day until it is not before arr1
             dep2 = abs_minutes(day, sch.dep_v2)
-            arr2 = abs_arrival_minutes(day, sch.dep_v2, sch.arr_v2)
+            while dep2 < arr1:
+                dep2 += 1440  # move to next day
+
+            # V2 arrival: compute from dep2 (not from day!)
+            arr2 = dep2 - (dep2 % 1440) + minutes_from_midnight(sch.arr_v2)
+            # if arrival clock is earlier than departure clock, it crosses midnight
+            if (arr2 % 1440) < (dep2 % 1440):
+                arr2 += 1440
 
             v1_dep_abs[(k, day)] = dep1
             v1_arr_abs[(k, day)] = arr1
@@ -256,11 +266,11 @@ def build_week_parameters(
 
             # Distribute energy uniformly across slots (if provided; else 0)
             if k in Etrip_v1 and len(slots_v1) > 0:
-                per_slot = float(Etrip_v1[k]) / len(slots_v1)
+                per_slot = float(Etrip_v1[k]) / (h_end_1 - h_start_1)
                 for h in slots_v1:
                     cons[(k, h)] += per_slot
             if k in Etrip_v2 and len(slots_v2) > 0:
-                per_slot = float(Etrip_v2[k]) / len(slots_v2)
+                per_slot = float(Etrip_v2[k]) / (h_end_2 - h_start_2)
                 for h in slots_v2:
                     cons[(k, h)] += per_slot
 
@@ -466,14 +476,14 @@ def build_pyomo_model(params: Dict, optimize_chargers: bool = True, choose_batte
 # Example usage
 # -----------------------------
 if __name__ == "__main__":
-    csv_path = "src/data/trips.csv"  # put your path here
+    csv_path = "src/data/schedule.csv"  # put your path here
 
     schedules = load_schedules_from_csv(csv_path)
 
     # Define charger types (placeholders)
     charger_types = ["slow", "fast"]
     P_kw = {"slow": 50.0, "fast": 150.0}     # you can change later
-    eta = {"slow": 0.92, "fast": 0.90}       # you can change later
+    eta = {"slow": 1, "fast": 1}       # you can change later
 
     # Battery configurations (placeholders)
     battery_configs_kwh = {
